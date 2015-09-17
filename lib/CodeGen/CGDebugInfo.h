@@ -52,6 +52,7 @@ class CGDebugInfo {
   friend class SaveAndRestoreLocation;
   CodeGenModule &CGM;
   const CodeGenOptions::DebugInfoKind DebugKind;
+  bool DebugTypeExtRefs;
   llvm::DIBuilder DBuilder;
   llvm::DICompileUnit *TheCU = nullptr;
   SourceLocation CurLoc;
@@ -64,8 +65,18 @@ class CGDebugInfo {
   llvm::DIType *OCLImage1dBufferDITy = nullptr;
   llvm::DIType *OCLImage2dDITy = nullptr;
   llvm::DIType *OCLImage2dArrayDITy = nullptr;
+  llvm::DIType *OCLImage2dDepthDITy = nullptr;
+  llvm::DIType *OCLImage2dArrayDepthDITy = nullptr;
+  llvm::DIType *OCLImage2dMSAADITy = nullptr;
+  llvm::DIType *OCLImage2dArrayMSAADITy = nullptr;
+  llvm::DIType *OCLImage2dMSAADepthDITy = nullptr;
+  llvm::DIType *OCLImage2dArrayMSAADepthDITy = nullptr;
   llvm::DIType *OCLImage3dDITy = nullptr;
   llvm::DIType *OCLEventDITy = nullptr;
+  llvm::DIType *OCLClkEventDITy = nullptr;
+  llvm::DIType *OCLQueueDITy = nullptr;
+  llvm::DIType *OCLNDRangeDITy = nullptr;
+  llvm::DIType *OCLReserveIDDITy = nullptr;
 
   /// Cache of previously constructed Types.
   llvm::DenseMap<const void *, llvm::TrackingMDRef> TypeCache;
@@ -83,7 +94,7 @@ class CGDebugInfo {
   llvm::SmallVector<ObjCInterfaceCacheEntry, 32> ObjCInterfaceCache;
 
   /// Cache of references to AST files such as PCHs or modules.
-  llvm::DenseMap<uint64_t, llvm::DIModule *> ModuleRefCache;
+  llvm::DenseMap<uint64_t, llvm::TrackingMDRef> ModuleRefCache;
 
   /// List of interfaces we want to keep even if orphaned.
   std::vector<void *> RetainedTypes;
@@ -280,6 +291,9 @@ public:
                          SourceLocation ScopeLoc, QualType FnType,
                          llvm::Function *Fn, CGBuilderTy &Builder);
 
+  /// Emit debug info for a function declaration.
+  void EmitFunctionDecl(GlobalDecl GD, SourceLocation Loc, QualType FnType);
+
   /// Constructs the debug code for exiting a function.
   void EmitFunctionEnd(CGBuilderTy &Builder);
 
@@ -343,6 +357,9 @@ public:
   /// Emit an Objective-C interface type standalone debug info.
   llvm::DIType *getOrCreateInterfaceType(QualType Ty, SourceLocation Loc);
 
+  /// Emit standalone debug info for a type.
+  llvm::DIType *getOrCreateStandaloneType(QualType Ty, SourceLocation Loc);
+
   void completeType(const EnumDecl *ED);
   void completeType(const RecordDecl *RD);
   void completeRequiredType(const RecordDecl *RD);
@@ -359,8 +376,11 @@ private:
   llvm::DIType *EmitTypeForVarWithBlocksAttr(const VarDecl *VD,
                                              uint64_t *OffSet);
 
-  /// Get context info for the decl.
-  llvm::DIScope *getContextDescriptor(const Decl *Decl);
+  /// Get context info for the DeclContext of \p Decl.
+  llvm::DIScope *getDeclContextDescriptor(const Decl *D);
+  /// Get context info for a given DeclContext \p Decl.
+  llvm::DIScope *getContextDescriptor(const Decl *Context,
+                                      llvm::DIScope *Default);
 
   llvm::DIScope *getCurrentContextDescriptor(const Decl *Decl);
 
@@ -386,6 +406,9 @@ private:
   /// Get a reference to a clang module.
   llvm::DIModule *
   getOrCreateModuleRef(ExternalASTSource::ASTSourceDescriptor Mod);
+
+  /// DebugTypeExtRefs: If \p D originated in a clang module, return it.
+  llvm::DIModule *getParentModuleOrNull(const Decl *D);
 
   /// Get the type from the cache or create a new partial type if
   /// necessary.

@@ -165,9 +165,12 @@ namespace clang {
     void AddFirstDeclFromEachModule(const Decl *D, bool IncludeLocal) {
       llvm::MapVector<ModuleFile*, const Decl*> Firsts;
       // FIXME: We can skip entries that we know are implied by others.
-      for (const Decl *R = D->getMostRecentDecl(); R; R = R->getPreviousDecl())
-        if (IncludeLocal || R->isFromASTFile())
+      for (const Decl *R = D->getMostRecentDecl(); R; R = R->getPreviousDecl()) {
+        if (R->isFromASTFile())
           Firsts[Writer.Chain->getOwningModuleFile(R)] = R;
+        else if (IncludeLocal)
+          Firsts[nullptr] = R;
+      }
       for (const auto &F : Firsts)
         Writer.AddDeclRef(F.second, Record);
     }
@@ -375,9 +378,6 @@ void ASTDeclWriter::VisitTagDecl(TagDecl *D) {
     Record.push_back(2);
     Writer.AddDeclRef(TD, Record);
     Writer.AddIdentifierRef(TD->getDeclName().getAsIdentifierInfo(), Record);
-  } else if (auto *DD = D->getDeclaratorForAnonDecl()) {
-    Record.push_back(3);
-    Writer.AddDeclRef(DD, Record);
   } else {
     Record.push_back(0);
   }
@@ -407,7 +407,6 @@ void ASTDeclWriter::VisitEnumDecl(EnumDecl *D) {
       !D->isUsed(false) &&
       !D->hasExtInfo() &&
       !D->getTypedefNameForAnonDecl() &&
-      !D->getDeclaratorForAnonDecl() &&
       D->getFirstDecl() == D->getMostRecentDecl() &&
       !D->isInvalidDecl() &&
       !D->isReferenced() &&
@@ -436,7 +435,6 @@ void ASTDeclWriter::VisitRecordDecl(RecordDecl *D) {
       !D->isUsed(false) &&
       !D->hasExtInfo() &&
       !D->getTypedefNameForAnonDecl() &&
-      !D->getDeclaratorForAnonDecl() &&
       D->getFirstDecl() == D->getMostRecentDecl() &&
       !D->isInvalidDecl() &&
       !D->isReferenced() &&
@@ -1524,20 +1522,21 @@ void ASTDeclWriter::VisitDeclContext(DeclContext *DC, uint64_t LexicalOffset,
   Record.push_back(VisibleOffset);
 }
 
-/// \brief Is this a local declaration (that is, one that will be written to
-/// our AST file)? This is the case for declarations that are neither imported
-/// from another AST file nor predefined.
-static bool isLocalDecl(ASTWriter &W, const Decl *D) {
-  if (D->isFromASTFile())
-    return false;
-  return W.getDeclID(D) >= NUM_PREDEF_DECL_IDS;
-}
-
 const Decl *ASTWriter::getFirstLocalDecl(const Decl *D) {
-  assert(isLocalDecl(*this, D) && "expected a local declaration");
+  /// \brief Is this a local declaration (that is, one that will be written to
+  /// our AST file)? This is the case for declarations that are neither imported
+  /// from another AST file nor predefined.
+  auto IsLocalDecl = [&](const Decl *D) -> bool {
+    if (D->isFromASTFile())
+      return false;
+    auto I = DeclIDs.find(D);
+    return (I == DeclIDs.end() || I->second >= NUM_PREDEF_DECL_IDS);
+  };
+
+  assert(IsLocalDecl(D) && "expected a local declaration");
 
   const Decl *Canon = D->getCanonicalDecl();
-  if (isLocalDecl(*this, Canon))
+  if (IsLocalDecl(Canon))
     return Canon;
 
   const Decl *&CacheEntry = FirstLocalDeclCache[Canon];
@@ -1545,7 +1544,7 @@ const Decl *ASTWriter::getFirstLocalDecl(const Decl *D) {
     return CacheEntry;
 
   for (const Decl *Redecl = D; Redecl; Redecl = Redecl->getPreviousDecl())
-    if (isLocalDecl(*this, Redecl))
+    if (IsLocalDecl(Redecl))
       D = Redecl;
   return CacheEntry = D;
 }
@@ -2051,7 +2050,6 @@ void ASTWriter::WriteDeclAbbrevs() {
 
   Abv = new BitCodeAbbrev();
   Abv->Add(BitCodeAbbrevOp(serialization::DECL_CONTEXT_VISIBLE));
-  Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Fixed, 32));
   Abv->Add(BitCodeAbbrevOp(BitCodeAbbrevOp::Blob));
   DeclContextVisibleLookupAbbrev = Stream.EmitAbbrev(Abv);
 }

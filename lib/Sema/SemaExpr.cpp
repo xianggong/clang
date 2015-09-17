@@ -677,6 +677,10 @@ ExprResult Sema::DefaultLvalueConversion(Expr *E) {
   if (T.hasQualifiers())
     T = T.getUnqualifiedType();
 
+  if (T->isMemberPointerType() &&
+      Context.getTargetInfo().getCXXABI().isMicrosoft())
+    RequireCompleteType(E->getExprLoc(), T, 0);
+
   UpdateMarkingForLValueToRValue(E);
   
   // Loading a __weak object implicitly retains the value, so we need a cleanup to 
@@ -2279,7 +2283,7 @@ Sema::ActOnIdExpression(Scope *S, CXXScopeSpec &SS,
 
     if (MightBeImplicitMember)
       return BuildPossibleImplicitMemberExpr(SS, TemplateKWLoc,
-                                             R, TemplateArgs);
+                                             R, TemplateArgs, S);
   }
 
   if (TemplateArgs || TemplateKWLoc.isValid()) {
@@ -2303,11 +2307,9 @@ Sema::ActOnIdExpression(Scope *S, CXXScopeSpec &SS,
 /// declaration name, generally during template instantiation.
 /// There's a large number of things which don't need to be done along
 /// this path.
-ExprResult
-Sema::BuildQualifiedDeclarationNameExpr(CXXScopeSpec &SS,
-                                        const DeclarationNameInfo &NameInfo,
-                                        bool IsAddressOfOperand,
-                                        TypeSourceInfo **RecoveryTSI) {
+ExprResult Sema::BuildQualifiedDeclarationNameExpr(
+    CXXScopeSpec &SS, const DeclarationNameInfo &NameInfo,
+    bool IsAddressOfOperand, const Scope *S, TypeSourceInfo **RecoveryTSI) {
   DeclContext *DC = computeDeclContext(SS, false);
   if (!DC)
     return BuildDependentDeclRefExpr(SS, /*TemplateKWLoc=*/SourceLocation(),
@@ -2374,7 +2376,7 @@ Sema::BuildQualifiedDeclarationNameExpr(CXXScopeSpec &SS,
   if (!R.empty() && (*R.begin())->isCXXClassMember() && !IsAddressOfOperand)
     return BuildPossibleImplicitMemberExpr(SS,
                                            /*TemplateKWLoc=*/SourceLocation(),
-                                           R, /*TemplateArgs=*/nullptr);
+                                           R, /*TemplateArgs=*/nullptr, S);
 
   return BuildDeclarationNameExpr(SS, R, /* ADL */ false);
 }
@@ -5560,6 +5562,14 @@ static bool breakDownVectorType(QualType type, uint64_t &len,
 /// vector nor a real type.
 bool Sema::areLaxCompatibleVectorTypes(QualType srcTy, QualType destTy) {
   assert(destTy->isVectorType() || srcTy->isVectorType());
+  
+  // Disallow lax conversions between scalars and ExtVectors (these
+  // conversions are allowed for other vector types because common headers
+  // depend on them).  Most scalar OP ExtVector cases are handled by the
+  // splat path anyway, which does what we want (convert, not bitcast).
+  // What this rules out for ExtVectors is crazy things like char4*float.
+  if (srcTy->isScalarType() && destTy->isExtVectorType()) return false;
+  if (destTy->isScalarType() && srcTy->isExtVectorType()) return false;
 
   uint64_t srcLen, destLen;
   QualType srcElt, destElt;
@@ -7534,6 +7544,18 @@ QualType Sema::CheckVectorOperands(ExprResult &LHS, ExprResult &RHS,
     return QualType();
   }
 
+  // OpenCL V1.1 6.2.6.p1:
+  // If the operands are of more than one vector type, then an error shall
+  // occur. Implicit conversions between vector types are not permitted, per
+  // section 6.2.1.
+  if (getLangOpts().OpenCL &&
+      RHSVecType && isa<ExtVectorType>(RHSVecType) &&
+      LHSVecType && isa<ExtVectorType>(LHSVecType)) {
+    Diag(Loc, diag::err_opencl_implicit_vector_conversion) << LHSType
+                                                           << RHSType;
+    return QualType();
+  }
+
   // Otherwise, use the generic diagnostic.
   Diag(Loc, diag::err_typecheck_vector_not_convertable)
     << LHSType << RHSType
@@ -9316,7 +9338,7 @@ static void DiagnoseConstAssignment(Sema &S, const Expr *E,
   if (const CallExpr *CE = dyn_cast<CallExpr>(E)) {
     // Function calls
     const FunctionDecl *FD = CE->getDirectCallee();
-    if (!IsTypeModifiable(FD->getReturnType(), IsDereference)) {
+    if (FD && !IsTypeModifiable(FD->getReturnType(), IsDereference)) {
       if (!DiagnosticEmitted) {
         S.Diag(Loc, diag::err_typecheck_assign_const) << ExprRange
                                                       << ConstFunction << FD;
@@ -12990,21 +13012,6 @@ bool Sema::tryCaptureVariable(
     if (isVariableAlreadyCapturedInScopeInfo(CSI, Var, Nested, CaptureType, 
                                              DeclRefType)) 
       break;
-    if (getLangOpts().OpenMP) {
-      if (auto *RSI = dyn_cast<CapturedRegionScopeInfo>(CSI)) {
-        // OpenMP private variables should not be captured in outer scope, so
-        // just break here.
-        if (RSI->CapRegionKind == CR_OpenMP) {
-          if (isOpenMPPrivateVar(Var, OpenMPLevel)) {
-            Nested = true;
-            DeclRefType = DeclRefType.getUnqualifiedType();
-            CaptureType = Context.getLValueReferenceType(DeclRefType);
-            break;
-          }
-          ++OpenMPLevel;
-        }
-      }
-    }
     // If we are instantiating a generic lambda call operator body, 
     // we do not want to capture new variables.  What was captured
     // during either a lambdas transformation or initial parsing
@@ -13150,6 +13157,21 @@ bool Sema::tryCaptureVariable(
       } while (!QTy.isNull() && QTy->isVariablyModifiedType());
     }
 
+    if (getLangOpts().OpenMP) {
+      if (auto *RSI = dyn_cast<CapturedRegionScopeInfo>(CSI)) {
+        // OpenMP private variables should not be captured in outer scope, so
+        // just break here.
+        if (RSI->CapRegionKind == CR_OpenMP) {
+          if (isOpenMPPrivateVar(Var, OpenMPLevel)) {
+            Nested = true;
+            DeclRefType = DeclRefType.getUnqualifiedType();
+            CaptureType = Context.getLValueReferenceType(DeclRefType);
+            break;
+          }
+          ++OpenMPLevel;
+        }
+      }
+    }
     if (CSI->ImpCaptureStyle == CapturingScopeInfo::ImpCap_None && !Explicit) {
       // No capture-default, and this is not an explicit capture 
       // so cannot capture this variable.  

@@ -416,7 +416,8 @@ def note_unreachable_silence : Note<
 
 /// Built-in functions.
 def ext_implicit_lib_function_decl : ExtWarn<
-  "implicitly declaring library function '%0' with type %1">;
+  "implicitly declaring library function '%0' with type %1">,
+  InGroup<ImplicitFunctionDeclare>;
 def note_include_header_or_declare : Note<
   "include the header <%0> or explicitly provide a declaration for '%1'">;
 def note_previous_builtin_declaration : Note<"%0 is a builtin with type %1">;
@@ -1977,6 +1978,11 @@ def err_function_concept_not_defined : Error<
   "function concept declaration must be a definition">;
 def err_var_concept_not_initialized : Error<
   "variable concept declaration must be initialized">;
+def err_function_concept_exception_spec : Error<
+  "function concept cannot have exception specification">;
+def err_concept_decl_invalid_specifiers : Error<
+  "%select{variable|function}0 concept cannot be declared "
+  "'%select{thread_local|inline|friend|constexpr}1'">;
 
 // C++11 char16_t/char32_t
 def warn_cxx98_compat_unicode_type : Warning<
@@ -2268,6 +2274,8 @@ def err_attribute_dll_not_extern : Error<
   "%q0 must have external linkage when declared %q1">;
 def err_attribute_dll_thread_local : Error<
   "%q0 cannot be thread local when declared %q1">;
+def err_attribute_dll_lambda : Error<
+  "lambda cannot be declared %0">;
 def warn_attribute_invalid_on_definition : Warning<
   "'%0' attribute cannot be specified on a definition">,
   InGroup<IgnoredAttributes>;
@@ -2368,6 +2376,9 @@ def err_cconv_varargs : Error<
   "variadic function cannot use %0 calling convention">;
 def warn_cconv_varargs : Warning<
   "%0 calling convention ignored on variadic function">,
+  InGroup<IgnoredAttributes>;
+def warn_cconv_structors : Warning<
+  "%0 calling convention ignored on constructor/destructor">,
   InGroup<IgnoredAttributes>;
 def err_regparm_mismatch : Error<"function declared with regparm(%0) "
   "attribute was previously declared "
@@ -4308,20 +4319,21 @@ def err_bitfield_has_negative_width : Error<
 def err_anon_bitfield_has_negative_width : Error<
   "anonymous bit-field has negative width (%0)">;
 def err_bitfield_has_zero_width : Error<"named bit-field %0 has zero width">;
-def err_bitfield_width_exceeds_type_size : Error<
-  "size of bit-field %0 (%1 bits) exceeds size of its type (%2 bits)">;
-def err_anon_bitfield_width_exceeds_type_size : Error<
-  "size of anonymous bit-field (%0 bits) exceeds size of its type (%1 bits)">;
+def err_bitfield_width_exceeds_type_width : Error<
+  "width of bit-field %0 (%1 bits) exceeds width of its type (%2 bit%s2)">;
+def err_anon_bitfield_width_exceeds_type_width : Error<
+  "width of anonymous bit-field (%0 bits) exceeds width of its type "
+  "(%1 bit%s1)">;
 def err_incorrect_number_of_vector_initializers : Error<
   "number of elements must be either one or match the size of the vector">;
 
 // Used by C++ which allows bit-fields that are wider than the type.
-def warn_bitfield_width_exceeds_type_size: Warning<
-  "size of bit-field %0 (%1 bits) exceeds the size of its type; value will be "
-  "truncated to %2 bits">;
-def warn_anon_bitfield_width_exceeds_type_size : Warning<
-  "size of anonymous bit-field (%0 bits) exceeds size of its type; value will "
-  "be truncated to %1 bits">;
+def warn_bitfield_width_exceeds_type_width: Warning<
+  "width of bit-field %0 (%1 bits) exceeds the width of its type; value will "
+  "be truncated to %2 bit%s2">, InGroup<BitFieldWidth>;
+def warn_anon_bitfield_width_exceeds_type_width : Warning<
+  "width of anonymous bit-field (%0 bits) exceeds width of its type; value "
+  "will be truncated to %1 bit%s1">, InGroup<BitFieldWidth>;
 
 def warn_missing_braces : Warning<
   "suggest braces around initialization of subobject">,
@@ -5213,6 +5225,8 @@ def err_builtin_func_cast_more_than_one_arg : Error<
   "function-style cast to a builtin type can only take one argument">;
 def err_value_init_for_array_type : Error<
   "array types cannot be value-initialized">;
+def err_value_init_for_function_type : Error<
+  "function types cannot be value-initialized">;
 def warn_format_nonliteral_noargs : Warning<
   "format string is not a string literal (potentially insecure)">,
   InGroup<FormatSecurity>;
@@ -5672,6 +5686,9 @@ def err_throw_incomplete_ptr : Error<
   "cannot throw pointer to object of incomplete type %0">;
 def err_return_in_constructor_handler : Error<
   "return in the catch of a function try block of a constructor is illegal">;
+def warn_cdtor_function_try_handler_mem_expr : Warning<
+  "cannot refer to a non-static member from the handler of a "
+  "%select{constructor|destructor}0 function try block">, InGroup<Exceptions>;
 
 let CategoryName = "Lambda Issue" in {
   def err_capture_more_than_once : Error<
@@ -6193,6 +6210,12 @@ def warn_atomic_op_has_invalid_memory_order : Warning<
 def err_atomic_load_store_uses_lib : Error<
   "atomic %select{load|store}0 requires runtime support that is not "
   "available for this target">;
+
+def err_nontemporal_builtin_must_be_pointer : Error<
+  "address argument to nontemporal builtin must be a pointer (%0 invalid)">;
+def err_nontemporal_builtin_must_be_pointer_intfltptr_or_vector : Error<
+  "address argument to nontemporal builtin must be a pointer to integer, float, "
+  "pointer, or a vector of such types (%0 invalid)">;
 
 def err_deleted_function_use : Error<"attempt to use a deleted function">;
 
@@ -7443,6 +7466,8 @@ def err_opencl_return_value_with_address_space : Error<
   "return value cannot be qualified with address space">;
 def err_opencl_constant_no_init : Error<
   "variable in constant address space must be initialized">;
+def err_opencl_implicit_vector_conversion : Error<
+  "implicit conversions between vector types (%0 and %1) are not permitted">;
 } // end of sema category
 
 let CategoryName = "OpenMP Issue" in {
@@ -7687,6 +7712,14 @@ def err_omp_wrong_linear_modifier_non_reference : Error<
   "variable of non-reference type %0 can be used only with 'val' modifier, but used with '%1'">;
 def err_omp_wrong_simdlen_safelen_values : Error<
   "the value of 'simdlen' parameter must be less than or equal to the value of the 'safelen' parameter">;
+def err_omp_wrong_if_directive_name_modifier : Error<
+  "directive name modifier '%0' is not allowed for '#pragma omp %1'">;
+def err_omp_no_more_if_clause : Error<
+  "no more 'if' clause is allowed">;
+def err_omp_unnamed_if_clause : Error<
+  "expected %select{|one of}0 %1 directive name modifier%select{|s}0">;
+def note_omp_previous_named_if_clause : Note<
+  "previous clause with directive name modifier specified here">;
 } // end of OpenMP category
 
 let CategoryName = "Related Result Type Issue" in {

@@ -84,6 +84,7 @@ class ASTWriter : public ASTDeserializationListener,
 public:
   typedef SmallVector<uint64_t, 64> RecordData;
   typedef SmallVectorImpl<uint64_t> RecordDataImpl;
+  typedef ArrayRef<uint64_t> RecordDataRef;
 
   friend class ASTDeclWriter;
   friend class ASTStmtWriter;
@@ -529,8 +530,8 @@ private:
   bool isLookupResultExternal(StoredDeclsList &Result, DeclContext *DC);
   bool isLookupResultEntirelyExternal(StoredDeclsList &Result, DeclContext *DC);
 
-  uint32_t GenerateNameLookupTable(const DeclContext *DC,
-                                   llvm::SmallVectorImpl<char> &LookupTable);
+  void GenerateNameLookupTable(const DeclContext *DC,
+                               llvm::SmallVectorImpl<char> &LookupTable);
   uint64_t WriteDeclContextLexicalBlock(ASTContext &Context, DeclContext *DC);
   uint64_t WriteDeclContextVisibleBlock(ASTContext &Context, DeclContext *DC);
   void WriteTypeDeclOffsets();
@@ -756,7 +757,7 @@ public:
   void AddPath(StringRef Path, RecordDataImpl &Record);
 
   /// \brief Emit the current record with the given path as a blob.
-  void EmitRecordWithPath(unsigned Abbrev, RecordDataImpl &Record,
+  void EmitRecordWithPath(unsigned Abbrev, RecordDataRef Record,
                           StringRef Path);
 
   /// \brief Add a version tuple to the given record
@@ -849,6 +850,7 @@ public:
   unsigned getExprImplicitCastAbbrev() const { return ExprImplicitCastAbbrev; }
 
   bool hasChain() const { return Chain; }
+  ASTReader *getChain() const { return Chain; }
 
   // ASTDeserializationListener implementation
   void ReaderInitialized(ASTReader *Reader) override;

@@ -684,6 +684,7 @@ CXXABI *ASTContext::createCXXABI(const TargetInfo &T) {
   case TargetCXXABI::GenericAArch64:
   case TargetCXXABI::GenericMIPS:
   case TargetCXXABI::GenericItanium:
+  case TargetCXXABI::WebAssembly:
     return CreateItaniumCXXABI(*this);
   case TargetCXXABI::Microsoft:
     return CreateMicrosoftCXXABI(*this);
@@ -1067,10 +1068,21 @@ void ASTContext::InitBuiltinTypes(const TargetInfo &Target) {
     InitBuiltinType(OCLImage1dBufferTy, BuiltinType::OCLImage1dBuffer);
     InitBuiltinType(OCLImage2dTy, BuiltinType::OCLImage2d);
     InitBuiltinType(OCLImage2dArrayTy, BuiltinType::OCLImage2dArray);
+    InitBuiltinType(OCLImage2dDepthTy, BuiltinType::OCLImage2dDepth);
+    InitBuiltinType(OCLImage2dArrayDepthTy, BuiltinType::OCLImage2dArrayDepth);
+    InitBuiltinType(OCLImage2dMSAATy, BuiltinType::OCLImage2dMSAA);
+    InitBuiltinType(OCLImage2dArrayMSAATy, BuiltinType::OCLImage2dArrayMSAA);
+    InitBuiltinType(OCLImage2dMSAADepthTy, BuiltinType::OCLImage2dMSAADepth);
+    InitBuiltinType(OCLImage2dArrayMSAADepthTy,
+                    BuiltinType::OCLImage2dArrayMSAADepth);
     InitBuiltinType(OCLImage3dTy, BuiltinType::OCLImage3d);
 
     InitBuiltinType(OCLSamplerTy, BuiltinType::OCLSampler);
     InitBuiltinType(OCLEventTy, BuiltinType::OCLEvent);
+    InitBuiltinType(OCLClkEventTy, BuiltinType::OCLClkEvent);
+    InitBuiltinType(OCLQueueTy, BuiltinType::OCLQueue);
+    InitBuiltinType(OCLNDRangeTy, BuiltinType::OCLNDRange);
+    InitBuiltinType(OCLReserveIDTy, BuiltinType::OCLReserveID);
   }
   
   // Builtin type for __objc_yes and __objc_no
@@ -1637,11 +1649,21 @@ TypeInfo ASTContext::getTypeInfoImpl(const Type *T) const {
       Align = Target->getIntAlign();
       break;
     case BuiltinType::OCLEvent:
+    case BuiltinType::OCLClkEvent:
+    case BuiltinType::OCLQueue:
+    case BuiltinType::OCLNDRange:
+    case BuiltinType::OCLReserveID:
     case BuiltinType::OCLImage1d:
     case BuiltinType::OCLImage1dArray:
     case BuiltinType::OCLImage1dBuffer:
     case BuiltinType::OCLImage2d:
     case BuiltinType::OCLImage2dArray:
+    case BuiltinType::OCLImage2dDepth:
+    case BuiltinType::OCLImage2dArrayDepth:
+    case BuiltinType::OCLImage2dMSAA:
+    case BuiltinType::OCLImage2dArrayMSAA:
+    case BuiltinType::OCLImage2dMSAADepth:
+    case BuiltinType::OCLImage2dArrayMSAADepth:
     case BuiltinType::OCLImage3d:
       // Currently these types are pointers to opaque types.
       Width = Target->getPointerWidth(0);
@@ -5373,8 +5395,18 @@ static char getObjCEncodingForPrimitiveKind(const ASTContext *C,
     case BuiltinType::OCLImage1dBuffer:
     case BuiltinType::OCLImage2d:
     case BuiltinType::OCLImage2dArray:
+    case BuiltinType::OCLImage2dDepth:
+    case BuiltinType::OCLImage2dArrayDepth:
+    case BuiltinType::OCLImage2dMSAA:
+    case BuiltinType::OCLImage2dArrayMSAA:
+    case BuiltinType::OCLImage2dMSAADepth:
+    case BuiltinType::OCLImage2dArrayMSAADepth:
     case BuiltinType::OCLImage3d:
     case BuiltinType::OCLEvent:
+    case BuiltinType::OCLClkEvent:
+    case BuiltinType::OCLQueue:
+    case BuiltinType::OCLNDRange:
+    case BuiltinType::OCLReserveID:
     case BuiltinType::OCLSampler:
     case BuiltinType::Dependent:
 #define BUILTIN_TYPE(KIND, ID)
@@ -8431,6 +8463,7 @@ MangleContext *ASTContext::createMangleContext() {
   case TargetCXXABI::GenericMIPS:
   case TargetCXXABI::iOS:
   case TargetCXXABI::iOS64:
+  case TargetCXXABI::WebAssembly:
     return ItaniumMangleContext::create(*this, getDiagnostics());
   case TargetCXXABI::Microsoft:
     return MicrosoftMangleContext::create(*this, getDiagnostics());
@@ -8547,6 +8580,25 @@ Expr *ASTContext::getDefaultArgExprForConstructor(const CXXConstructorDecl *CD,
                                                   unsigned ParmIdx) {
   return ABI->getDefaultArgExprForConstructor(
       cast<CXXConstructorDecl>(CD->getFirstDecl()), ParmIdx);
+}
+
+void ASTContext::addTypedefNameForUnnamedTagDecl(TagDecl *TD,
+                                                 TypedefNameDecl *DD) {
+  return ABI->addTypedefNameForUnnamedTagDecl(TD, DD);
+}
+
+TypedefNameDecl *
+ASTContext::getTypedefNameForUnnamedTagDecl(const TagDecl *TD) {
+  return ABI->getTypedefNameForUnnamedTagDecl(TD);
+}
+
+void ASTContext::addDeclaratorForUnnamedTagDecl(TagDecl *TD,
+                                                DeclaratorDecl *DD) {
+  return ABI->addDeclaratorForUnnamedTagDecl(TD, DD);
+}
+
+DeclaratorDecl *ASTContext::getDeclaratorForUnnamedTagDecl(const TagDecl *TD) {
+  return ABI->getDeclaratorForUnnamedTagDecl(TD);
 }
 
 void ASTContext::setParameterIndex(const ParmVarDecl *D, unsigned int index) {
