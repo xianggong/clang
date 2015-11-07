@@ -1768,6 +1768,11 @@ static const char *DataLayoutStringSI =
   "-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128"
   "-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64";
 
+static const char *DataLayoutStringSIM2S =
+  "e-p:32:32-p1:32:32-p2:32:32-p3:32:32-p4:32:32-p5:32:32-p24:32:32"
+  "-i64:64-v16:16-v24:32-v32:32-v48:64-v96:128"
+  "-v192:256-v256:256-v512:512-v1024:1024-v2048:2048-n32:64";
+
 class AMDGPUTargetInfo : public TargetInfo {
   static const Builtin::Info BuiltinInfo[];
   static const char * const GCCRegNames[];
@@ -1791,13 +1796,20 @@ class AMDGPUTargetInfo : public TargetInfo {
   bool hasFP64:1;
   bool hasFMAF:1;
   bool hasLDEXPF:1;
+  
+  // For Multi2Sim
+  bool isM2S;
 
 public:
   AMDGPUTargetInfo(const llvm::Triple &Triple)
     : TargetInfo(Triple) {
 
     if (Triple.getArch() == llvm::Triple::amdgcn) {
-      DataLayoutString = DataLayoutStringSI;
+      if (Triple.getOS() == llvm::Triple::M2S) {
+        DataLayoutString = DataLayoutStringSIM2S;
+        isM2S = true;
+      } else
+        DataLayoutString = DataLayoutStringSI;
       GPU = GK_SOUTHERN_ISLANDS;
       hasFP64 = true;
       hasFMAF = true;
@@ -1814,6 +1826,10 @@ public:
   }
 
   uint64_t getPointerWidthV(unsigned AddrSpace) const override {
+    if (isM2S) {
+      return 32;
+    }
+    
     if (GPU <= GK_CAYMAN)
       return 32;
 
@@ -1945,7 +1961,10 @@ public:
     case GK_SOUTHERN_ISLANDS:
     case GK_SEA_ISLANDS:
     case GK_VOLCANIC_ISLANDS:
-      DataLayoutString = DataLayoutStringSI;
+      if (isM2S)
+        DataLayoutString = DataLayoutStringSIM2S;
+      else
+        DataLayoutString = DataLayoutStringSI;
       hasFP64 = true;
       hasFMAF = true;
       hasLDEXPF = true;
@@ -4395,8 +4414,8 @@ public:
         setABI("aapcs");
         break;
       case llvm::Triple::GNU:
-	setABI("apcs-gnu");
-	break;
+  setABI("apcs-gnu");
+  break;
       default:
         if (Triple.getOS() == llvm::Triple::NetBSD)
           setABI("apcs-gnu");
